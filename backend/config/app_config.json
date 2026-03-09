@@ -1,0 +1,44 @@
+{
+  "current_personality": "shuangkuaisisi",
+  "openclaw": {
+    "enabled": true,
+    "base_url": "http://127.0.0.1:18789",
+    "token": "291649c89d96626d466cef7dfe1edf0031312f5897ce2402",
+    "agent_name": "Live2D",
+    "session_key": "live2d-ai",
+    "timeout_seconds": 120
+  },
+  "tts": {
+    "speed_ratio": 1.2,
+    "volume_ratio": 1.0,
+    "pitch_ratio": 1.0
+  },
+  "vad_speech_threshold": 0.035,
+  "vad_interrupt_tts": false,
+  "personalities": [
+    {
+      "id": "tianxinxiaomei",
+      "name": "甜心小美",
+      "voice_type": "zh_female_tianxinxiaomei_emo_v2_mars_bigtts",
+      "description": "甜美可爱，活泼开朗"
+    },
+    {
+      "id": "gaolengyujie",
+      "name": "高冷御姐",
+      "voice_type": "zh_female_gaolengyujie_emo_v2_mars_bigtts",
+      "description": "冷静高雅，知性从容"
+    },
+    {
+      "id": "roumeinvyou",
+      "name": "柔美女友",
+      "voice_type": "zh_female_roumeinvyou_emo_v2_mars_bigtts",
+      "description": "温柔体贴，温暖贴心"
+    },
+    {
+      "id": "shuangkuaisisi",
+      "name": "爽快思思",
+      "voice_type": "zh_female_shuangkuaisisi_emo_v2_mars_bigtts",
+      "description": "直爽干练，元气满满"
+    }
+  ]
+}

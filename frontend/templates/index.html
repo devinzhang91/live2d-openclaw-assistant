@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D AI 助手</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=19">
+</head>
+<body>
+    <!-- 纯白模式退出按钮 -->
+    <button id="pureWhiteExitBtn" title="退出纯白模式">✕</button>
+
+    <!-- 纯白模式浮动气泡 -->
+    <div class="pw-bubble" id="pwBubbleAI">
+        <div class="pw-bubble-label">👒 AI 助手</div>
+        <div class="pw-bubble-text"></div>
+    </div>
+    <div class="pw-bubble" id="pwBubbleUser">
+        <div class="pw-bubble-label">🕶️ 你</div>
+        <div class="pw-bubble-text"></div>
+    </div>
+
+    <div class="container">
+        <!-- Live2D 容器 -->
+        <div id="live2d-container">
+            <!-- 动作预览面板 -->
+            <div id="motionPanel" class="motion-panel">
+                <div class="motion-panel-header">
+                    <span>🎭 动作预览</span>
+                    <button class="motion-panel-close" id="motionPanelClose" title="关闭">×</button>
+                </div>
+                <div class="motion-panel-grid">
+                    <button class="motion-btn" data-motion="m01" title="待机">待机</button>
+                    <button class="motion-btn" data-motion="m02" title="疑惑">疑惑</button>
+                    <button class="motion-btn" data-motion="m03" title="思考">思考</button>
+                    <button class="motion-btn" data-motion="m04" title="担忧">担忧</button>
+                    <button class="motion-btn" data-motion="m05" title="开心">开心</button>
+                    <button class="motion-btn" data-motion="m06" title="开心(手)">开心♪</button>
+                    <button class="motion-btn" data-motion="m07" title="惊讶">惊讶</button>
+                    <button class="motion-btn" data-motion="m08" title="开心(手2)">开心★</button>
+                    <button class="motion-btn" data-motion="m09" title="生气">生气</button>
+                    <button class="motion-btn" data-motion="m10" title="担忧2">担忧2</button>
+                </div>
+            </div>
+            <!-- 动作面板切换按钮 -->
+            <button id="motionPanelToggle" class="motion-panel-toggle" title="动作预览">🎭</button>
+            
+        </div>
+
+        <!-- 聊天界面 -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>Live2D AI 助手</h2>
+                <div class="header-right">
+                    <div class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">就绪</span>
+                    </div>
+                    <button class="btn-settings" id="pureWhiteModeBtn" title="纯白模式">⚪</button>
+                    <button class="btn-settings" id="settingsBtn" title="设置">⚙️</button>
+                </div>
+            </div>
+
+            <!-- 消息显示区域 -->
+            <div class="chat-messages" id="chatMessages">
+                <div class="message system">
+                    <div class="message-content">
+                        你好！我是你的 AI 助手，请开始对话吧！
+                    </div>
+                </div>
+            </div>
+
+            <!-- 输入区域 -->
+            <div class="chat-input">
+                <!-- 输入模式切换 -->
+                <div class="input-mode-toggle">
+                    <button id="textModeBtn" class="mode-btn active">
+                        <span>📝</span>
+                        <span>文字</span>
+                    </button>
+                    <button id="voiceModeBtn" class="mode-btn">
+                        <span>🎤</span>
+                        <span>语音</span>
+                    </button>
+                </div>
+
+                <!-- 文字输入 -->
+                <div id="textInputArea" class="input-area">
+                    <textarea
+                        id="textInput"
+                        placeholder="输入消息..."
+                        rows="2"
+                    ></textarea>
+                    <button id="sendBtn" class="btn btn-send">
+                        发送
+                    </button>
+                </div>
+
+                <!-- 语音输入 -->
+                <div id="voiceInputArea" class="input-area" style="display: none;">
+                    <!-- VAD 模式切换 -->
+                    <div class="vad-mode-toggle">
+                        <button id="holdToSpeakBtn" class="vad-mode-btn active" title="按住说话模式">
+                            按住说话
+                        </button>
+                        <button id="vadAutoBtn" class="vad-mode-btn" title="VAD 自动识别语音">
+                            VAD 自动识别
+                        </button>
+                    </div>
+                    <div id="voicePrompt" class="voice-prompt">按住录音按钮开始说话</div>
+                    <button id="recordBtn" class="btn btn-record" title="按住录音">
+                        🎤 长按录音
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置弹窗 -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>⚙️ 设置</h3>
+                <button class="modal-close" id="settingsClose">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">AI 性格</label>
+                    <select class="form-select" id="personalitySelect">
+                        <!-- 由 JS 填充 -->
+                    </select>
+                    <p class="form-hint" id="personalityHint"></p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Live2D 模型</label>
+                    <select class="form-select" id="live2dModelSelect">
+                        <option value="Hiyori">Hiyori</option>
+                        <option value="Qianqian">芊芊 (Qianqian)</option>
+                    </select>
+                    <p class="form-hint">选择不同的 Live2D 看板娘模型</p>
+                </div>
+                <div class="form-group">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <label class="form-label" style="margin:0;">Live2D 鼠标跟随</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="live2dMouseFollow">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="form-hint">开启后Live2D模型会跟随鼠标移动，关闭后停止跟随</p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">语速 <span class="speed-badge" id="speedBadge">1.0x</span></label>
+                    <input type="range" class="form-range" id="speedSlider"
+                        min="0.5" max="2.0" step="0.1" value="1.0">
+                    <div class="range-labels">
+                        <span>慢 0.5x</span>
+                        <span>正常 1.0x</span>
+                        <span>快 2.0x</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">VAD 灵敏度 <span class="speed-badge" id="vadThreshBadge">0.030</span></label>
+                    <input type="range" class="form-range" id="vadThreshSlider"
+                        min="0.005" max="0.100" step="0.005" value="0.030">
+                    <div class="range-labels">
+                        <span>超灵敏 0.005</span>
+                        <span>默认 0.030</span>
+                        <span>迟钗 0.100</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <label class="form-label" style="margin:0;">对话打断</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="vadInterruptTts">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="form-hint">默认关闭：TTS 播放时暂停 VAD；开启后可在 TTS 播放期间通过说话打断回复。</p>
+                </div>
+                <!-- OpenClaw Webhook 设置 -->
+                <div class="form-group" style="border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <label class="form-label" style="margin:0;">👾 OpenClaw Webhook</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="openclawEnabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="form-hint">VAD/ASR 识别后选把消息发送给本地 OpenClaw 并通过 TTS 提醒查收</p>
+                    <div id="openclawFields" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+                        <div>
+                            <label class="form-label" style="font-size:12px;">Base URL</label>
+                            <input type="text" id="openclawUrl" class="form-range"
+                                style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;"
+                                placeholder="http://127.0.0.1:18789">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;">Token</label>
+                            <input type="password" id="openclawToken" class="form-range"
+                                style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;"
+                                placeholder="hooks.token 配置的密钥">
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:12px;">Agent 名称</label>
+                                <input type="text" id="openclawAgentName" class="form-range"
+                                    style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;"
+                                    placeholder="Live2D">
+                            </div>
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:12px;">超时（秒）</label>
+                                <input type="number" id="openclawTimeout" class="form-range"
+                                    style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;"
+                                    min="10" max="300" value="60">
+                            </div>
+                        </div>
+                    </div>
+                </div>            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="settingsCancel">取消</button>
+                <button class="btn btn-save" id="settingsSave">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 脚本 -->
+    <!-- Live2D Widget -->
+    <script src="/static/autoload.js?v=16"></script>
+    <!-- Live2D 错误过滤补丁（抑制模型加载前的错误） -->
+    <script src="/static/js/error-filter-patch.js?v=7"></script>
+    <!-- Live2D 嘴形同步补丁 -->
+    <script src="/static/js/lip-sync-patch.js?v=11"></script>
+    <!-- Live2D 控制器 -->
+    <script src="/static/js/live2d-controller.js?v=33"></script>
+    <!-- 应用脚本 -->
+    <script src="/static/js/audio-recorder.js?v=21"></script>
+    <script src="/static/js/chat.js?v=19"></script>
+    <script src="/static/js/app.js?v=40"></script>
+</body>
+</html>
