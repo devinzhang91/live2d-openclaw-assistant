@@ -54,10 +54,18 @@ Thumbs.db
 *.tmp
 *.log
 temp_*
+*.pid
 
 # 日志文件
 logs/
 *.log.*
+
+# 火山引擎 API 文档（包含敏感信息）
+volc_*.md
+
+# 测试文件
+tests/
+test_*.sh
 
 # 模型文件（大文件）
 models/*.onnx
@@ -71,4 +79,9 @@ models/*.safetensors
 *.wav
 *.mp3
 *.ogg
+
+# 脚本和临时文件
+*.pid
+start.sh
+stop.sh
 live2d-widget
