@@ -109,6 +109,11 @@ class ChatManager {
         });
     }
 
+    sendAudioStop() {
+        if (!this.connected) return;
+        this.ws.send(JSON.stringify({ type: 'audio_stop' }));
+    }
+
     handleMessage(data) {
         // suppress noisy high-frequency events from the console
         if (data.type !== 'llm_chunk' && data.type !== 'tts_audio' && data.type !== 'asr_chunk') {
