@@ -21,3 +21,4 @@ edge-tts>=6.1.0
 # VAD - 使用 Silero 模型
 torch>=2.0.0
 torchaudio>=2.0.0
+silero_vad

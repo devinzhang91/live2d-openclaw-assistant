@@ -41,6 +41,25 @@ class WhisperASRSession(ASRSession):
         # 由于 faster-whisper 不支持真正的流式，这里不发送部分结果
         # 子类可以重写这个方法实现真正的流式
 
+    async def send_audio_chunk_raw(self, pcm_bytes: bytes, is_last: bool = False):
+        """接收 PCM bytes 并转换为 numpy 数组（供 websocket.py 调用）
+
+        Args:
+            pcm_bytes: PCM 音频数据 (int16)
+            is_last: 是否为最后一包
+        """
+        if not self.is_active:
+            return
+
+        if is_last:
+            # 结束会话
+            await self.end()
+            return
+
+        # PCM bytes -> numpy array (int16 -> float32)
+        arr = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        await self.send_audio(arr, self._sample_rate)
+
     async def end(self):
         """结束会话，识别收集的音频"""
         if not self.is_active:

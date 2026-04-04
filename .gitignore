@@ -21,6 +21,7 @@ wheels/
 *.egg
 MANIFEST
 venv/
+.venv/
 env/
 ENV/
 
@@ -45,6 +46,7 @@ secrets.json
 *.swp
 *.swo
 *~
+.claude/
 
 # 操作系统
 .DS_Store
@@ -64,6 +66,7 @@ logs/
 volc_*.md
 
 # 测试文件
+test/
 tests/
 test_*.sh
 

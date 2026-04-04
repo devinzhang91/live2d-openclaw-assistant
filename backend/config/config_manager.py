@@ -114,6 +114,7 @@ class ConfigManager:
 
     def get_settings_dict(self) -> dict:
         """返回前端所需的设置数据"""
+        from backend.config.settings import settings as _settings
         return {
             "current_personality": self.get_current_personality_id(),
             "speed_ratio": self.get_speed_ratio(),
@@ -121,6 +122,7 @@ class ConfigManager:
             "vad_interrupt_tts": self.get_vad_interrupt_tts(),
             "personalities": self.get_personalities(),
             "openclaw": self.get_openclaw_config(),
+            "voice_mode": getattr(_settings, "voice_mode", "pipeline"),
         }
 
     # ====== 写入接口 ======
