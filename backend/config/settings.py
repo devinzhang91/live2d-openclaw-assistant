@@ -73,6 +73,27 @@ class Settings:
     vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.25"))
     vad_sample_rate: int = int(os.getenv("VAD_SAMPLE_RATE", "16000"))
 
+    # ========== 语音模式配置 ==========
+    voice_mode: str = os.getenv("VOICE_MODE", "pipeline")  # pipeline, realtime_volc, realtime_local
+
+    # ========== 端到端实时语音配置 ==========
+    realtime_input_mod: str = os.getenv("REALTIME_INPUT_MOD", "audio")  # audio 或 push_to_talk
+    realtime_recv_timeout: int = int(os.getenv("REALTIME_RECV_TIMEOUT", "120"))  # 静默超时（秒），最大 120
+
+    # ========== 火山端到端实时语音配置 ==========
+    volc_realtime_app_id: str = os.getenv("VOLC_REALTIME_APP_ID", "")
+    volc_realtime_access_key: str = os.getenv("VOLC_REALTIME_ACCESS_KEY", "")
+    volc_realtime_resource_id: str = os.getenv("VOLC_REALTIME_RESOURCE_ID", "volc.speech.dialog")
+    volc_realtime_app_key: str = os.getenv("VOLC_REALTIME_APP_KEY", "PlgvMymc7f3tQnJ6")
+    volc_realtime_ws_url: str = os.getenv(
+        "VOLC_REALTIME_WS_URL",
+        "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+    )
+    volc_realtime_model: str = os.getenv("VOLC_REALTIME_MODEL", "1.2.1.1")
+    volc_realtime_voice: str = os.getenv("VOLC_REALTIME_VOICE", "zh_male_yunzhou_jupiter_bigtts")
+    volc_realtime_enable_websearch: bool = os.getenv("VOLC_REALTIME_ENABLE_WEBSEARCH", "false").lower() == "true"
+    volc_realtime_enable_music: bool = os.getenv("VOLC_REALTIME_ENABLE_MUSIC", "false").lower() == "true"
+
 
 # 全局配置实例
 settings = get_settings()
