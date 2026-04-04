@@ -591,6 +591,253 @@ async def websocket_chat(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# =============================================================================
+# 端到端实时语音 WebSocket 端点 (VOICE_MODE=realtime_volc)
+# 火山端到端模型自带 ASR，不需要单独的 ASR 服务
+# =============================================================================
+
+class RealtimeVolcCallback:
+    """VolcRealtimeSession 回调，将事件转发到前端 WebSocket"""
+
+    def __init__(self, websocket: WebSocket, session_id: str):
+        self.websocket = websocket
+        self.session_id = session_id
+        self.dialog_id = None
+
+    def on_session_started(self, data: dict):
+        self.dialog_id = data.get("dialog_id")
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "realtime_session_started", "dialog_id": self.dialog_id},
+                self.websocket,
+            )
+        )
+
+    def on_asr_response(self, text: str, is_interim: bool = False):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "asr_partial", "content": text, "is_interim": is_interim},
+                self.websocket,
+            )
+        )
+
+    def on_asr_ended(self):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "asr_complete"},
+                self.websocket,
+            )
+        )
+
+    def on_tts_response(self, audio_bytes: bytes):
+        # 发送 TTS 音频 (base64 编码)
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "tts_audio", "audio": base64.b64encode(audio_bytes).decode("utf-8")},
+                self.websocket,
+            )
+        )
+
+    def on_tts_sentence_start(self, data: dict):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "tts_sentence_start", "data": data},
+                self.websocket,
+            )
+        )
+
+    def on_tts_sentence_end(self, data: dict):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "tts_sentence_end", "data": data},
+                self.websocket,
+            )
+        )
+
+    def on_tts_ended(self, data: dict):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "tts_complete", "data": data},
+                self.websocket,
+            )
+        )
+
+    def on_chat_response(self, data: dict):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "chat_response", "data": data},
+                self.websocket,
+            )
+        )
+
+    def on_chat_ended(self, data: dict):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "chat_complete", "data": data},
+                self.websocket,
+            )
+        )
+
+    def on_session_finished(self):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "realtime_session_finished"},
+                self.websocket,
+            )
+        )
+
+    def on_session_failed(self, error_message: str):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "error", "message": f"Session failed: {error_message}"},
+                self.websocket,
+            )
+        )
+
+    def on_error(self, exc: Exception):
+        asyncio.get_event_loop().create_task(
+            manager.send_personal_message(
+                {"type": "error", "message": str(exc)},
+                self.websocket,
+            )
+        )
+
+    def on_close(self):
+        pass
+
+
+@router.websocket("/ws/realtime_volc")
+async def websocket_realtime_volc(websocket: WebSocket):
+    """
+    WebSocket 端点 - 火山端到端实时语音模式
+
+    端到端语音到语音对话，模型自带 ASR，不需要单独的 ASR 服务。
+    Flow:
+    1. audio_start -> 创建 VolcRealtimeSession
+    2. audio -> 流式发送音频到服务端
+    3. audio_end -> 发送 END_ASR，服务端开始处理
+    4. 接收 TTS 音频流和 ASR 识别结果
+    """
+    import gzip
+
+    await manager.connect(websocket)
+
+    # 会话状态
+    active_session = None
+    session_id = str(uuid.uuid4())
+    audio_ended_sent = False
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+            content = data.get("content", "")
+
+            if message_type == "audio_start":
+                # 创建端到端实时语音会话
+                from backend.services.realtime_service import create_realtime_service
+
+                service = create_realtime_service("realtime_volc")
+                callback = RealtimeVolcCallback(websocket, session_id)
+
+                try:
+                    active_session = await service.create_session(
+                        session_id=session_id,
+                        callback=callback,
+                    )
+                    await manager.send_personal_message(
+                        {"type": "status", "message": "Recording..."},
+                        websocket,
+                    )
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    await manager.send_personal_message(
+                        {"type": "error", "message": f"Failed to start session: {e}"},
+                        websocket,
+                    )
+
+            elif message_type == "audio":
+                # 流式发送音频数据
+                if active_session is None:
+                    continue
+
+                try:
+                    chunk_bytes = base64.b64decode(content)
+                    arr, sr = sf.read(io.BytesIO(chunk_bytes), dtype='float32')
+                    if arr.ndim > 1:
+                        arr = arr.mean(axis=1)
+
+                    # 重采样到 16kHz
+                    if sr != 16000:
+                        from scipy.signal import resample_poly
+                        from math import gcd as _gcd
+                        _g = _gcd(int(sr), 16000)
+                        arr = resample_poly(arr, 16000 // _g, int(sr) // _g).astype(np.float32)
+
+                    # 转为 PCM int16 字节
+                    pcm_bytes = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+                    # 使用 session.send_audio() 发送音频
+                    await active_session.send_audio(pcm_bytes)
+
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    await manager.send_personal_message(
+                        {"type": "error", "message": f"Audio send error: {e}"},
+                        websocket,
+                    )
+
+            elif message_type == "audio_end":
+                # 全双工模式：不发送 END_ASR，只记录状态
+                # (服务端根据音频流自动检测说话结束)
+                audio_ended_sent = True
+
+            elif message_type == "audio_stop":
+                # 用户主动停止发送音频，但保持会话存活
+                # (用于 full-duplex 模式下暂停音频输入)
+                if active_session is None:
+                    continue
+                audio_ended_sent = True
+
+            elif message_type == "text":
+                # 文本消息（text 模式）
+                if active_session is None:
+                    continue
+
+                try:
+                    await active_session.send_text(content)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    await manager.send_personal_message(
+                        {"type": "error", "message": f"Text send error: {e}"},
+                        websocket,
+                    )
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await manager.send_personal_message(
+            {"type": "error", "message": str(e)},
+            websocket,
+        )
+        manager.disconnect(websocket)
+    finally:
+        if active_session is not None:
+            try:
+                await active_session.finish_session()
+            except Exception:
+                pass
+            try:
+                await active_session.close()
+            except Exception:
+                pass
+
+
 async def handle_text_message(text: str, history: list, websocket: WebSocket):
     """Handle text message"""
     # Add user message to history
