@@ -718,14 +718,11 @@ async def websocket_realtime_volc(websocket: WebSocket):
     3. audio_end -> 发送 END_ASR，服务端开始处理
     4. 接收 TTS 音频流和 ASR 识别结果
     """
-    import gzip
-
     await manager.connect(websocket)
 
     # 会话状态
     active_session = None
     session_id = str(uuid.uuid4())
-    audio_ended_sent = False
 
     try:
         while True:
@@ -792,14 +789,14 @@ async def websocket_realtime_volc(websocket: WebSocket):
             elif message_type == "audio_end":
                 # 全双工模式：不发送 END_ASR，只记录状态
                 # (服务端根据音频流自动检测说话结束)
-                audio_ended_sent = True
+                pass
 
             elif message_type == "audio_stop":
                 # 用户主动停止发送音频，但保持会话存活
                 # (用于 full-duplex 模式下暂停音频输入)
                 if active_session is None:
                     continue
-                audio_ended_sent = True
+                pass
 
             elif message_type == "text":
                 # 文本消息（text 模式）
