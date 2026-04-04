@@ -701,9 +701,10 @@ class VolcRealtimeService(RealtimeService):
         voice: str = None,
         enable_websearch: bool = None,
         enable_music: bool = None,
-        input_mod: str = "push_to_talk",
+        input_mod: str = "audio",
         tts_format: str = "pcm_s16le",
         tts_sample_rate: int = 24000,
+        recv_timeout: int = 120,
     ):
         # 加载配置
         try:
@@ -731,6 +732,7 @@ class VolcRealtimeService(RealtimeService):
         self.input_mod = input_mod
         self.tts_format = tts_format
         self.tts_sample_rate = tts_sample_rate
+        self.recv_timeout = recv_timeout
 
     async def create_session(
         self,
@@ -755,6 +757,7 @@ class VolcRealtimeService(RealtimeService):
             input_mod=config.get("input_mod", self.input_mod),
             tts_format=config.get("tts_format", self.tts_format),
             tts_sample_rate=config.get("tts_sample_rate", self.tts_sample_rate),
+            recv_timeout=config.get("recv_timeout", self.recv_timeout),
         )
 
         if callback:
