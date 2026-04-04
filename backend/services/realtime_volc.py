@@ -414,7 +414,7 @@ class VolcRealtimeSession(RealtimeSession):
                         "model": self.model,
                         "enable_volc_websearch": self.enable_websearch,
                         "enable_music": self.enable_music,
-                        "recv_timeout": 120,
+                        "recv_timeout": self.recv_timeout,
                     }
                 },
             }
