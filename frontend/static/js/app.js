@@ -721,13 +721,12 @@ class App {
             // 停止录音消息
             if (this.recordingMessage) {
                 this.recordingMessage.element.querySelector('.message-content').textContent = '🎤 正在处理...';
-                this.recordingMessage = null;
             }
-
-            this.realtimeRecording = false;
 
         } catch (error) {
             console.error('停止实时录音失败:', error);
+        } finally {
+            this.recordingMessage = null;
             this.realtimeRecording = false;
         }
     }
