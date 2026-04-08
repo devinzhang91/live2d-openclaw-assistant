@@ -13,7 +13,7 @@
     "volume_ratio": 1.0,
     "pitch_ratio": 1.0
   },
-  "vad_speech_threshold": 0.035,
+  "vad_speech_threshold": 0.03,
   "vad_interrupt_tts": false,
   "personalities": [
     {

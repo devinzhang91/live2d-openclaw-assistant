@@ -57,8 +57,65 @@ def check_dependencies():
         return False
 
 
+def clear_logs():
+    """清空 logs 目录"""
+    import shutil
+    logs_dir = Path(__file__).parent / "logs"
+    if logs_dir.exists():
+        for f in logs_dir.glob("*"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    else:
+        logs_dir.mkdir(exist_ok=True)
+
+
+def setup_logging():
+    """配置应用日志"""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    logs_dir = Path(__file__).parent / "logs"
+    logs_dir.mkdir(exist_ok=True)
+
+    # 应用日志
+    app_log = logs_dir / "server.log"
+    app_handler = RotatingFileHandler(app_log, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    app_handler.setLevel(logging.INFO)
+    app_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+
+    # 实时语音详细日志
+    realtime_log = logs_dir / "realtime.log"
+    realtime_handler = RotatingFileHandler(realtime_log, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    realtime_handler.setLevel(logging.DEBUG)
+    realtime_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+
+    # 配置根日志
+    logging.basicConfig(level=logging.INFO, handlers=[app_handler])
+
+    # 配置实时语音模块专属 logger
+    rt_logger = logging.getLogger("backend.services.realtime_volc")
+    rt_logger.setLevel(logging.DEBUG)
+    rt_logger.addHandler(realtime_handler)
+    rt_logger.addHandler(app_handler)
+
+    ws_logger = logging.getLogger("backend.api.websocket")
+    ws_logger.setLevel(logging.INFO)
+    ws_logger.addHandler(realtime_handler)
+    ws_logger.addHandler(app_handler)
+
+
 def start_server():
     """启动服务器"""
+    clear_logs()
+    setup_logging()
     print("🚀 启动 Live2D AI 助手...")
     print("📍 访问地址: http://localhost:8000")
     print("📚 API 文档: http://localhost:8000/docs")

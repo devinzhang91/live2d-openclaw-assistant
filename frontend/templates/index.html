@@ -98,8 +98,8 @@
 
                 <!-- 语音输入 -->
                 <div id="voiceInputArea" class="input-area" style="display: none;">
-                    <!-- VAD 模式切换 -->
-                    <div class="vad-mode-toggle">
+                    <!-- VAD 模式切换（非 realtime_volc 模式时显示） -->
+                    <div class="vad-mode-toggle" id="vadModeToggle">
                         <button id="holdToSpeakBtn" class="vad-mode-btn active" title="按住说话模式">
                             按住说话
                         </button>
@@ -107,6 +107,7 @@
                             VAD 自动识别
                         </button>
                     </div>
+                    <!-- 实时语音模式提示（非 realtime_volc 模式时显示） -->
                     <div id="voicePrompt" class="voice-prompt">按住录音按钮开始说话</div>
                     <button id="recordBtn" class="btn btn-record" title="按住录音">
                         🎤 长按录音
@@ -124,6 +125,11 @@
                 <button class="modal-close" id="settingsClose">✕</button>
             </div>
             <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">语音模式</label>
+                    <div id="voiceModeDisplay" class="form-select" style="background:#f1f5f9;color:#64748b;cursor:default;">读取中...</div>
+                    <p class="form-hint" id="voiceModeHint"></p>
+                </div>
                 <div class="form-group">
                     <label class="form-label">AI 性格</label>
                     <select class="form-select" id="personalitySelect">
@@ -237,6 +243,7 @@
     <!-- 应用脚本 -->
     <script src="/static/js/audio-recorder.js?v=21"></script>
     <script src="/static/js/chat.js?v=19"></script>
-    <script src="/static/js/app.js?v=40"></script>
+    <script src="/static/js/realtime-voice-controller.js?v=1"></script>
+    <script src="/static/js/app.js?v=41"></script>
 </body>
 </html>

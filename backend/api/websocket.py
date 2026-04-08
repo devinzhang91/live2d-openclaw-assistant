@@ -11,6 +11,7 @@ import re
 import uuid
 import soundfile as sf
 import numpy as np
+import logging
 
 from backend.services.llm_service import llm_service
 from backend.services.asr_service import asr_service
@@ -603,9 +604,11 @@ class RealtimeVolcCallback:
         self.websocket = websocket
         self.session_id = session_id
         self.dialog_id = None
+        self.last_asr_text = ""
 
     def on_session_started(self, data: dict):
         self.dialog_id = data.get("dialog_id")
+        self.last_asr_text = ""
         asyncio.get_event_loop().create_task(
             manager.send_personal_message(
                 {"type": "realtime_session_started", "dialog_id": self.dialog_id},
@@ -614,6 +617,8 @@ class RealtimeVolcCallback:
         )
 
     def on_asr_response(self, text: str, is_interim: bool = False):
+        if text:
+            self.last_asr_text = text
         asyncio.get_event_loop().create_task(
             manager.send_personal_message(
                 {"type": "asr_partial", "content": text, "is_interim": is_interim},
@@ -624,7 +629,7 @@ class RealtimeVolcCallback:
     def on_asr_ended(self):
         asyncio.get_event_loop().create_task(
             manager.send_personal_message(
-                {"type": "asr_complete"},
+                {"type": "asr_complete", "content": self.last_asr_text},
                 self.websocket,
             )
         )
@@ -633,7 +638,13 @@ class RealtimeVolcCallback:
         # 发送 TTS 音频 (base64 编码)
         asyncio.get_event_loop().create_task(
             manager.send_personal_message(
-                {"type": "tts_audio", "audio": base64.b64encode(audio_bytes).decode("utf-8")},
+                {
+                    "type": "tts_audio",
+                    "content": base64.b64encode(audio_bytes).decode("utf-8"),
+                    "format": "pcm_s16le",
+                    "sample_rate": 24000,
+                    "channels": 1,
+                },
                 self.websocket,
             )
         )
@@ -706,6 +717,9 @@ class RealtimeVolcCallback:
         pass
 
 
+logger = logging.getLogger("backend.api.websocket")
+
+
 @router.websocket("/ws/realtime_volc")
 async def websocket_realtime_volc(websocket: WebSocket):
     """
@@ -715,14 +729,50 @@ async def websocket_realtime_volc(websocket: WebSocket):
     Flow:
     1. audio_start -> 创建 VolcRealtimeSession
     2. audio -> 流式发送音频到服务端
-    3. audio_end -> 发送 END_ASR，服务端开始处理
+    3. audio_end -> 发送 END_ASR，结束当前轮 ASR 输入
     4. 接收 TTS 音频流和 ASR 识别结果
     """
+    import logging
+    ws_logger = logging.getLogger("backend.api.websocket")
+
     await manager.connect(websocket)
+    ws_logger.info(f"[WS] 新连接建立, remote={websocket.client}")
 
     # 会话状态
     active_session = None
-    session_id = str(uuid.uuid4())
+    session_id = None
+    audio_packets_sent = 0
+
+    async def send_ws_error(message: str):
+        await manager.send_personal_message(
+            {"type": "error", "message": message},
+            websocket,
+        )
+
+    async def close_session_on_error(log_message: str, user_message: str, exc: Exception):
+        ws_logger.error(f"{log_message}: {exc}")
+        import traceback
+        traceback.print_exc()
+        await close_active_session()
+        await send_ws_error(user_message)
+
+    async def close_active_session():
+        nonlocal active_session
+        if active_session is None:
+            return
+
+        session_to_close = active_session
+        active_session = None
+
+        try:
+            await session_to_close.finish_session()
+        except Exception:
+            pass
+
+        try:
+            await session_to_close.close()
+        except Exception:
+            pass
 
     try:
         while True:
@@ -731,7 +781,12 @@ async def websocket_realtime_volc(websocket: WebSocket):
             content = data.get("content", "")
 
             if message_type == "audio_start":
-                # 创建端到端实时语音会话
+                if active_session is not None:
+                    await close_active_session()
+
+                session_id = str(uuid.uuid4())
+                audio_packets_sent = 0
+                ws_logger.info(f"[WS] audio_start, session_id={session_id}")
                 from backend.services.realtime_service import create_realtime_service
 
                 service = create_realtime_service("realtime_volc")
@@ -740,22 +795,22 @@ async def websocket_realtime_volc(websocket: WebSocket):
                 try:
                     active_session = await service.create_session(
                         session_id=session_id,
+                        config={"input_mod": "push_to_talk"},
                         callback=callback,
                     )
+                    ws_logger.info(f"[WS] 会话创建成功, session_id={session_id}")
                     await manager.send_personal_message(
                         {"type": "status", "message": "Recording..."},
                         websocket,
                     )
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    await manager.send_personal_message(
-                        {"type": "error", "message": f"Failed to start session: {e}"},
-                        websocket,
+                    await close_session_on_error(
+                        "[WS] 会话创建失败",
+                        f"Failed to start session: {e}",
+                        e,
                     )
 
             elif message_type == "audio":
-                # 流式发送音频数据
                 if active_session is None:
                     continue
 
@@ -765,74 +820,69 @@ async def websocket_realtime_volc(websocket: WebSocket):
                     if arr.ndim > 1:
                         arr = arr.mean(axis=1)
 
-                    # 重采样到 16kHz
                     if sr != 16000:
                         from scipy.signal import resample_poly
                         from math import gcd as _gcd
                         _g = _gcd(int(sr), 16000)
                         arr = resample_poly(arr, 16000 // _g, int(sr) // _g).astype(np.float32)
 
-                    # 转为 PCM int16 字节
                     pcm_bytes = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-
-                    # 使用 session.send_audio() 发送音频
                     await active_session.send_audio(pcm_bytes)
+                    audio_packets_sent += 1
+
+                    if audio_packets_sent % 50 == 0:
+                        ws_logger.debug(f"[WS] 已发送音频包 {audio_packets_sent}, session_id={session_id}")
 
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    await manager.send_personal_message(
-                        {"type": "error", "message": f"Audio send error: {e}"},
-                        websocket,
+                    await close_session_on_error(
+                        "[WS] 音频发送失败",
+                        f"Audio send error: {e}",
+                        e,
                     )
 
             elif message_type == "audio_end":
-                # 全双工模式：不发送 END_ASR，只记录状态
-                # (服务端根据音频流自动检测说话结束)
-                pass
-
-            elif message_type == "audio_stop":
-                # 用户主动停止发送音频，但保持会话存活
-                # (用于 full-duplex 模式下暂停音频输入)
+                ws_logger.info(f"[WS] audio_end, 共发送 {audio_packets_sent} 包, session_id={session_id}")
                 if active_session is None:
                     continue
-                pass
+                try:
+                    await active_session.end_asr()
+                except Exception as e:
+                    await close_session_on_error(
+                        "[WS] END_ASR 发送失败",
+                        f"END_ASR error: {e}",
+                        e,
+                    )
+
+            elif message_type == "audio_stop":
+                ws_logger.info(f"[WS] audio_stop, 用户主动停止发送")
+                await close_active_session()
 
             elif message_type == "text":
-                # 文本消息（text 模式）
                 if active_session is None:
                     continue
 
                 try:
+                    ws_logger.info(f"[WS] 发送文本: {content[:50]}")
                     await active_session.send_text(content)
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    await manager.send_personal_message(
-                        {"type": "error", "message": f"Text send error: {e}"},
-                        websocket,
+                    await close_session_on_error(
+                        "[WS] 文本发送失败",
+                        f"Text send error: {e}",
+                        e,
                     )
 
     except WebSocketDisconnect:
+        ws_logger.info(f"[WS] 客户端断开, session_id={session_id}, 共发送 {audio_packets_sent} 包")
         manager.disconnect(websocket)
     except Exception as e:
+        ws_logger.error(f"[WS] 异常: {e}")
         import traceback
         traceback.print_exc()
-        await manager.send_personal_message(
-            {"type": "error", "message": str(e)},
-            websocket,
-        )
+        await send_ws_error(str(e))
         manager.disconnect(websocket)
     finally:
-        if active_session is not None:
-            try:
-                await active_session.finish_session()
-            except Exception:
-                pass
-            try:
-                await active_session.close()
-            except Exception:
-                pass
+        await close_active_session()
+
 
 
 async def handle_text_message(text: str, history: list, websocket: WebSocket):

@@ -143,6 +143,12 @@ class ChatManager {
             case 'llm_thinking':
             case 'openclaw_thinking':
             case 'openclaw_message':
+            case 'realtime_session_started':
+            case 'realtime_session_finished':
+            case 'chat_response':
+            case 'chat_complete':
+            case 'tts_sentence_start':
+            case 'tts_sentence_end':
                 if (this.onMessage) {
                     this.onMessage(data);
                 }

@@ -14,7 +14,9 @@ class App {
         this.vadListening = false;  // VAD 是否正在监听
         this.realtimeFullDuplex = false;  // 是否为全双工实时语音模式
         this.realtimeRecording = false;  // 全双工模式下是否正在录音
-        this.realtimeTimer = null;        // 全双工模式 200ms 发包定时器
+        this.realtimeVoiceController = typeof RealtimeVoiceController !== 'undefined'
+            ? new RealtimeVoiceController()
+            : null;
         this.live2dController = null;  // Live2D 控制器
         this.ttsAudioBuffer = [];  // TTS 音频缓冲区（备用）
         this.ttsPlaying = false;  // TTS 是否正在播放
@@ -43,11 +45,11 @@ class App {
             // 初始化音频录制器
             await this.initAudioRecorder();
 
-            // 初始化聊天管理器
-            await this.initChatManager();
-
-            // 初始化设置
+            // 初始化设置（先加载，确保 voice_mode 等配置就绪）
             await this.initSettings();
+
+            // 初始化聊天管理器（依赖 voice_mode 配置选择 WebSocket 端点）
+            await this.initChatManager();
 
             // 绑定事件
             this.bindEvents();
@@ -181,24 +183,61 @@ class App {
         const voiceModeBtn = document.getElementById('voiceModeBtn');
         const textInputArea = document.getElementById('textInputArea');
         const voiceInputArea = document.getElementById('voiceInputArea');
+        const vadModeToggle = document.getElementById('vadModeToggle');
+        const voicePrompt = document.getElementById('voicePrompt');
+        const recordBtn = document.getElementById('recordBtn');
 
         if (mode === 'text') {
             textModeBtn.classList.add('active');
             voiceModeBtn.classList.remove('active');
             textInputArea.style.display = 'flex';
             voiceInputArea.style.display = 'none';
-            // 停止 VAD 监听
-            this.stopVadListening();
+            if (this.realtimeFullDuplex) {
+                this.stopRealtimeRecording();
+            } else {
+                this.stopVadListening();
+            }
         } else {
             voiceModeBtn.classList.add('active');
             textModeBtn.classList.remove('active');
             voiceInputArea.style.display = 'flex';
             textInputArea.style.display = 'none';
-            // 全双工模式下不需要前端 VAD，等待用户点击按钮
+
+            if (this.realtimeFullDuplex) {
+                if (vadModeToggle) vadModeToggle.style.display = 'none';
+                if (voicePrompt) {
+                    voicePrompt.style.display = '';
+                }
+                if (recordBtn) recordBtn.style.display = 'none';
+                this.vadMode = 'auto';
+                this.startRealtimeRecording();
+            } else {
+                if (vadModeToggle) vadModeToggle.style.display = '';
+                if (voicePrompt) {
+                    voicePrompt.style.display = '';
+                    voicePrompt.textContent = '按住录音按钮开始说话';
+                }
+                if (recordBtn) {
+                    recordBtn.style.display = 'block';
+                    recordBtn.textContent = '🎤 长按录音';
+                    recordBtn.title = '按住录音';
+                }
+            }
         }
     }
 
     switchVadMode(mode) {
+        if (this.realtimeFullDuplex) {
+            this.vadMode = 'auto';
+            const holdToSpeakBtn = document.getElementById('holdToSpeakBtn');
+            const vadAutoBtn = document.getElementById('vadAutoBtn');
+            const recordBtn = document.getElementById('recordBtn');
+            if (holdToSpeakBtn) holdToSpeakBtn.classList.remove('active');
+            if (vadAutoBtn) vadAutoBtn.classList.add('listening');
+            if (recordBtn) recordBtn.style.display = 'none';
+            return;
+        }
+
         this.vadMode = mode;
 
         const holdToSpeakBtn = document.getElementById('holdToSpeakBtn');
@@ -235,6 +274,46 @@ class App {
         voicePrompt.style.color = color;
     }
 
+    _setVoiceUiState(state) {
+        const states = {
+            realtime_listening: {
+                prompt: '🎤 实时对话已开启，正在监听...',
+                background: '#dcfce7',
+                color: '#16a34a',
+                status: '实时对话已开启，等待说话...',
+            },
+            realtime_speaking: {
+                prompt: '🎤 正在说话...',
+                background: '#fee2e2',
+                color: '#ef4444',
+                status: '正在接收语音...',
+            },
+            realtime_recognizing: {
+                prompt: '⏳ 正在识别...',
+                background: '#fef9c3',
+                color: '#a16207',
+                status: '正在识别...',
+            },
+            realtime_idle: {
+                prompt: '点击“语音”按钮后自动开始实时对话',
+                background: '#f1f5f9',
+                color: '#64748b',
+                status: '就绪',
+            },
+            tts_paused_for_vad: {
+                prompt: '🔈 AI 回复中，已暂停监听',
+                background: '#e0e7ff',
+                color: '#4338ca',
+                status: 'AI 回复中...',
+            },
+        };
+
+        const target = states[state];
+        if (!target) return;
+        this._setVoicePrompt(target.prompt, target.background, target.color);
+        this.updateStatus(target.status);
+    }
+
     _isVadInterruptEnabled() {
         return !!(this._settingsData && this._settingsData.vad_interrupt_tts);
     }
@@ -260,13 +339,15 @@ class App {
             return;
         }
 
-        if (this.vadListening) {
+        if (this.realtimeFullDuplex && this.realtimeRecording) {
+            this._vadPausedForTts = true;
+            this.stopRealtimeRecording();
+        } else if (this.vadListening) {
             this._vadPausedForTts = true;
             this.stopVadListening();
         }
 
-        this._setVoicePrompt('🔈 AI 回复中，已暂停监听', '#e0e7ff', '#4338ca');
-        this.updateStatus('AI 回复中...');
+        this._setVoiceUiState('tts_paused_for_vad');
     }
 
     _resumeVadAfterTts() {
@@ -276,7 +357,9 @@ class App {
 
         this._vadPausedForTts = false;
 
-        if (this._shouldAutoResumeVad() && !this.vadListening) {
+        if (this.realtimeFullDuplex && this.inputMode === 'voice' && !this.realtimeRecording) {
+            this.startRealtimeRecording();
+        } else if (this._shouldAutoResumeVad() && !this.vadListening) {
             this.startVadListening();
         }
     }
@@ -324,26 +407,14 @@ class App {
         // 录音按钮（仅按住说话模式使用）
         const recordBtn = document.getElementById('recordBtn');
 
-        // 全双工模式：点击开始/停止
-        // 非全双工模式：按住说话
-        if (this.realtimeFullDuplex) {
-            recordBtn.addEventListener('click', () => {
-                if (this.realtimeRecording) {
-                    this.stopRealtimeRecording();
-                } else {
-                    this.startRealtimeRecording();
-                }
-            });
-        } else {
-            // 按住说话（原有逻辑）
-            recordBtn.addEventListener('mousedown', () => { this.startRecording(); });
-            recordBtn.addEventListener('mouseup', () => { this.stopRecording(); });
-            recordBtn.addEventListener('mouseleave', () => {
-                if (this.isRecording) this.stopRecording();
-            });
-            recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.startRecording(); });
-            recordBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.stopRecording(); });
-        }
+        // 按住说话（realtime_volc 模式下该按钮会隐藏）
+        recordBtn.addEventListener('mousedown', () => { this.startRecording(); });
+        recordBtn.addEventListener('mouseup', () => { this.stopRecording(); });
+        recordBtn.addEventListener('mouseleave', () => {
+            if (this.isRecording) this.stopRecording();
+        });
+        recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.startRecording(); });
+        recordBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.stopRecording(); });
 
         // 纯白模式按钮
         document.getElementById('pureWhiteModeBtn').addEventListener('click', () => {
@@ -637,8 +708,80 @@ class App {
         }
     }
 
+    _setRealtimeListeningPrompt() {
+        this._setVoiceUiState('realtime_listening');
+    }
+
+    _attachRealtimeVadHandlers() {
+        this.audioRecorder.onVadSpeechStart = () => {
+            const sessionAction = this.realtimeVoiceController
+                ? this.realtimeVoiceController.handleSpeechStart()
+                : { startSession: true };
+            if (!sessionAction.startSession) {
+                return;
+            }
+
+            if (this._isVadInterruptEnabled() && this._hasActiveTtsPlayback()) {
+                this._interruptTts();
+            }
+
+            if (this.live2dController) this.live2dController.unlockAudioContext();
+            this._live2dReact('listening');
+            if (this.chatManager) this.chatManager.startAudioStream();
+
+            if (!this.recordingMessage) {
+                this.recordingMessage = this.addMessage('user', '🎤 正在聆听...');
+                this._animateRecordingMessage();
+            }
+
+            this._setVoiceUiState('realtime_speaking');
+        };
+
+        this.audioRecorder.onAudioChunk = (wavArrayBuffer) => {
+            if (!this.chatManager) return;
+            const base64 = this.arrayBufferToBase64(wavArrayBuffer);
+            const chunkAction = this.realtimeVoiceController
+                ? this.realtimeVoiceController.handleAudioChunk(base64)
+                : { sendAudio: true, payload: base64 };
+            if (chunkAction.sendAudio) {
+                this.chatManager.sendAudioChunk(chunkAction.payload);
+            }
+        };
+
+        this.audioRecorder.onVadSpeechEnd = () => {
+            const sessionAction = this.realtimeVoiceController
+                ? this.realtimeVoiceController.handleSpeechEnd()
+                : { endSession: true };
+            if (!sessionAction.endSession) {
+                return;
+            }
+
+            if (this.chatManager) this.chatManager.endAudioStream();
+            if (this.recordingMessage) {
+                this.recordingMessage.element.querySelector('.message-content').textContent = '🎤 正在识别...';
+            }
+            this._setVoiceUiState('realtime_recognizing');
+        };
+    }
+
+    _detachRealtimeVadHandlers() {
+        this.audioRecorder.onVadSpeechStart = null;
+        this.audioRecorder.onAudioChunk = null;
+        this.audioRecorder.onVadSpeechEnd = null;
+    }
+
     startRealtimeRecording() {
-        if (this.realtimeRecording || !this.audioAvailable) {
+        if (this.realtimeRecording || !this.audioAvailable || !this.realtimeFullDuplex) {
+            return;
+        }
+
+        const transition = this.realtimeVoiceController
+            ? this.realtimeVoiceController.enterVoiceMode({
+                audioAvailable: this.audioAvailable,
+                realtimeEnabled: this.realtimeFullDuplex
+            })
+            : { startListening: true };
+        if (!transition.startListening) {
             return;
         }
 
@@ -647,80 +790,49 @@ class App {
                 this.live2dController.unlockAudioContext();
             }
             this._live2dReact('listening');
+            this._attachRealtimeVadHandlers();
 
-            this.audioRecorder.start();
+            this.audioRecorder.startVAD();
+            this.vadListening = true;
             this.realtimeRecording = true;
-
-            const recordBtn = document.getElementById('recordBtn');
-            recordBtn.classList.add('recording');
-
-            const voicePrompt = document.getElementById('voicePrompt');
-            if (voicePrompt) {
-                voicePrompt.textContent = '实时录音中...';
-                voicePrompt.style.background = '#fee2e2';
-                voicePrompt.style.color = '#ef4444';
-            }
-
-            this.updateStatus('实时录音中...');
-
-            // 开始音频流
-            this.chatManager.startAudioStream();
-
-            // 添加录音消息
-            this.recordingMessage = this.addMessage('user', '🎤 实时录音中...');
-            this._animateRecordingMessage();
-
-            // 启动 200ms 发包定时器
-            this.realtimeTimer = setInterval(() => {
-                if (this.realtimeRecording && this.audioRecorder && this.audioRecorder.audioData) {
-                    const chunk = this.audioRecorder.getAudioData();
-                    if (chunk && chunk.length > 0) {
-                        const base64 = this.arrayBufferToBase64(chunk);
-                        this.chatManager.sendAudioChunk(base64);
-                    }
-                }
-            }, 200);
+            this._setRealtimeListeningPrompt();
+            console.log('实时对话 VAD 监听已启动');
 
         } catch (error) {
             console.error('开始实时录音失败:', error);
+            if (this.realtimeVoiceController) {
+                this.realtimeVoiceController.leaveVoiceMode();
+            }
             this.showError('无法开始实时录音');
         }
     }
 
     stopRealtimeRecording() {
-        if (!this.realtimeRecording) {
+        if (!this.realtimeRecording && !this.vadListening) {
             return;
         }
 
-        try {
-            // 停止定时器
-            if (this.realtimeTimer) {
-                clearInterval(this.realtimeTimer);
-                this.realtimeTimer = null;
-            }
+        const transition = this.realtimeVoiceController
+            ? this.realtimeVoiceController.leaveVoiceMode()
+            : { abortSession: false };
 
-            this.audioRecorder.stop();
+        try {
+            if (this.vadListening) {
+                this.audioRecorder.stopVAD();
+            }
+            this.vadListening = false;
+            this._detachRealtimeVadHandlers();
+
+            if (transition.abortSession && this.chatManager) {
+                this.chatManager.sendAudioStop();
+            }
 
             const recordBtn = document.getElementById('recordBtn');
-            recordBtn.classList.remove('recording');
-
-            const voicePrompt = document.getElementById('voicePrompt');
-            if (voicePrompt) {
-                voicePrompt.textContent = '按住录音按钮开始说话';
-                voicePrompt.style.background = '#f1f5f9';
-                voicePrompt.style.color = '#64748b';
+            if (recordBtn) {
+                recordBtn.classList.remove('recording');
             }
-
-            this.updateStatus('正在处理...');
-
-            // 结束音频流
-            if (this.chatManager) {
-                this.chatManager.endAudioStream();
-            }
-
-            // 停止录音消息
             if (this.recordingMessage) {
-                this.recordingMessage.element.querySelector('.message-content').textContent = '🎤 正在处理...';
+                this.recordingMessage.element.remove();
             }
 
         } catch (error) {
@@ -728,6 +840,7 @@ class App {
         } finally {
             this.recordingMessage = null;
             this.realtimeRecording = false;
+            this._setVoiceUiState('realtime_idle');
         }
     }
 
@@ -739,7 +852,8 @@ class App {
         this.recordingInterval = setInterval(() => {
             if (this.recordingMessage) {
                 dotCount = (dotCount + 1) % 4;
-                const text = '🎤 正在录音' + dots.substring(0, dotCount);
+                const baseText = this.realtimeFullDuplex ? '🎤 正在聆听' : '🎤 正在录音';
+                const text = baseText + dots.substring(0, dotCount);
                 this.recordingMessage.element.querySelector('.message-content').textContent = text;
             }
         }, 500);
@@ -784,22 +898,27 @@ class App {
 
             case 'asr_complete':
                 // ASR 有结果：确认是真实语音，此时才打断 TTS 并开始新对话
-                if (data.content) {
+                const finalAsrText = data.content || (
+                    this.currentResponseElement && this.currentResponseElement.type === 'asr'
+                        ? this.currentResponseElement.element.querySelector('.message-content').textContent
+                        : ''
+                );
+                if (finalAsrText) {
                     this._interruptTts();  // 停止当前 TTS 播放并清空队列
                 }
                 if (this.recordingMessage) {
                     this.recordingMessage.element.remove();
                     this.recordingMessage = null;
                 }
-                if (data.content) {
+                if (finalAsrText) {
                     // 如果有 asr_partial 创建的消息框，用最终结果更新它；否则新增消息
                     if (this.currentResponseElement && this.currentResponseElement.type === 'asr') {
-                        this.currentResponseElement.element.querySelector('.message-content').textContent = data.content;
+                        this.currentResponseElement.element.querySelector('.message-content').textContent = finalAsrText;
                         this.currentResponseElement.type = 'user';  // 标记为最终 user 消息
                     } else {
-                        this.addMessage('user', data.content);
+                        this.addMessage('user', finalAsrText);
                     }
-                    this._updatePwBubble('user', data.content, false);
+                    this._updatePwBubble('user', finalAsrText, false);
                 }
                 this.currentResponseElement = null;
                 break;
@@ -926,24 +1045,14 @@ class App {
 
             case 'realtime_session_finished':
                 console.log('[WebSocket] 实时语音会话已结束');
-                // 停止实时录音
-                if (this.realtimeRecording) {
-                    // 停止定时器
-                    if (this.realtimeTimer) {
-                        clearInterval(this.realtimeTimer);
-                        this.realtimeTimer = null;
-                    }
-                    this.realtimeRecording = false;
-
-                    const recordBtn = document.getElementById('recordBtn');
-                    if (recordBtn) recordBtn.classList.remove('recording');
-
-                    const voicePrompt = document.getElementById('voicePrompt');
-                    if (voicePrompt) {
-                        voicePrompt.textContent = '按住录音按钮开始说话';
-                        voicePrompt.style.background = '#f1f5f9';
-                        voicePrompt.style.color = '#64748b';
-                    }
+                const finishInfo = this.realtimeVoiceController
+                    ? this.realtimeVoiceController.handleSessionFinished()
+                    : { ignored: false };
+                if (finishInfo.ignored) {
+                    break;
+                }
+                if (this.inputMode === 'voice' && this.realtimeRecording) {
+                    this._setRealtimeListeningPrompt();
                 }
                 break;
 
@@ -1370,6 +1479,29 @@ class App {
             select.appendChild(opt);
         });
 
+        // 语音模式显示（只读，服务端通过 VOICE_MODE 环境变量控制）
+        const voiceModeDisplay = document.getElementById('voiceModeDisplay');
+        const voiceModeHint = document.getElementById('voiceModeHint');
+        if (voiceModeDisplay) {
+            const mode = data.voice_mode;
+            if (mode === 'realtime_volc') {
+                voiceModeDisplay.textContent = '🔥 实时对话（全双工）';
+                voiceModeDisplay.style.background = '#fef3c7';
+                voiceModeDisplay.style.color = '#92400e';
+            } else if (mode === 'realtime_local') {
+                voiceModeDisplay.textContent = '🔊 实时对话（本地）';
+                voiceModeDisplay.style.background = '#dbeafe';
+                voiceModeDisplay.style.color = '#1e40af';
+            } else {
+                voiceModeDisplay.textContent = '📝 管道模式（文字+语音分离）';
+                voiceModeDisplay.style.background = '#f1f5f9';
+                voiceModeDisplay.style.color = '#64748b';
+            }
+        }
+        if (voiceModeHint) {
+            voiceModeHint.textContent = '此配置由服务端环境变量 VOICE_MODE 控制';
+        }
+
         const speed = data.speed_ratio ?? 1.0;
         document.getElementById('speedSlider').value = speed;
         document.getElementById('speedBadge').textContent = `${speed.toFixed(1)}x`;
@@ -1620,6 +1752,7 @@ class App {
 
         // 停止 VAD 监听
         this.stopVadListening();
+        this.stopRealtimeRecording();
 
         if (this.audioRecorder) {
             this.audioRecorder.destroy();

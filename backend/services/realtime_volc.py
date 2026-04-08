@@ -18,6 +18,16 @@ from typing import Optional
 
 from backend.services.realtime_base import RealtimeCallback, RealtimeSession, RealtimeService
 
+import logging
+logger = logging.getLogger("backend.services.realtime_volc")
+
+SUPPORTED_REALTIME_VOICES = {
+    "zh_male_yunzhou_jupiter_bigtts",
+    "zh_female_xiaohe_jupiter_bigtt",
+    "zh_male_xiaotian_jupiter_bigtt",
+}
+DEFAULT_REALTIME_VOICE = "zh_male_yunzhou_jupiter_bigtts"
+
 
 # =============================================================================
 # 协议常量
@@ -154,11 +164,11 @@ def _build_audio_message(
 
     协议关键发现 (来自 demo 对比测试):
     - message_type = AUDIO_ONLY_REQUEST (0x02)
-    - flags = NO_SEQUENCE (0x00) - 不带 sequence 字段
+    - flags = MSG_WITH_EVENT (0x04) - 不带 sequence，但必须带 event 字段
     - serialization = NO_SERIALIZATION (0x0)
     - compression = GZIP (0x1) - 音频数据必须 gzip 压缩
     """
-    flags = FLAG_NONE  # 0x00 = NO_SEQUENCE，不包含 sequence 字段
+    flags = FLAG_WITH_EVENT
 
     buf = bytearray()
     buf.extend(_build_header(MSG_TYPE_AUDIO_ONLY_REQUEST, flags, SERIALIZATION_RAW, COMPRESSION_GZIP))
@@ -400,7 +410,6 @@ class VolcRealtimeSession(RealtimeSession):
                 "asr": {
                     "extra": {
                         "end_smooth_window_ms": 1500,
-                        "input_mod": self.input_mod,
                     }
                 },
                 "dialog": {
@@ -415,6 +424,7 @@ class VolcRealtimeSession(RealtimeSession):
                         "enable_volc_websearch": self.enable_websearch,
                         "enable_music": self.enable_music,
                         "recv_timeout": self.recv_timeout,
+                        "input_mod": self.input_mod,
                     }
                 },
             }
@@ -435,6 +445,8 @@ class VolcRealtimeSession(RealtimeSession):
 
             self._dialog_id = frame.get("payload_json", {}).get("dialog_id")
             self.is_active = True
+
+            logger.info(f"[{self.session_id}] 会话启动成功, dialog_id={self._dialog_id}, input_mod={self.input_mod}, recv_timeout={self.recv_timeout}s")
 
             # 启动后台接收循环
             self._recv_task = asyncio.create_task(self._recv_loop())
@@ -502,12 +514,16 @@ class VolcRealtimeSession(RealtimeSession):
 
                 if event == EVENT_SESSION_FAILED:
                     error_msg = self._get_error_message(frame)
+                    logger.warning(f"[{self.session_id}] SessionFailed: {error_msg}")
                     self._error_message = error_msg
+                    self.is_active = False
                     self._notify_session_failed(error_msg)
                     self._session_failed.set()
                     return
 
                 if event == EVENT_SESSION_FINISHED:
+                    logger.info(f"[{self.session_id}] 会话正常结束 (recv_timeout)")
+                    self.is_active = False
                     self._notify_session_finished()
                     self._session_finished.set()
                     return
@@ -515,10 +531,12 @@ class VolcRealtimeSession(RealtimeSession):
                 if event == EVENT_CONNECTION_FAILED:
                     error_msg = self._get_error_message(frame)
                     self._error_message = error_msg
+                    self.is_active = False
                     self._notify_error(RuntimeError(f"Connection failed: {error_msg}"))
                     return
 
                 if event == EVENT_CONNECTION_FINISHED:
+                    self.is_active = False
                     self._notify_close()
                     return
 
@@ -527,10 +545,13 @@ class VolcRealtimeSession(RealtimeSession):
                     audio = frame.get("payload", b"")
                     if audio:
                         self._notify_tts_response(audio)
+                        logger.debug(f"[{self.session_id}] TTS 音频帧 {len(audio)} bytes")
 
                 # TTS 句子开始
                 if event == EVENT_TTS_SENTENCE_START:
                     data = frame.get("payload_json", {})
+                    text = data.get("text", "")[:30]
+                    logger.debug(f"[{self.session_id}] TTS 句子开始: {text}...")
                     self._notify_tts_sentence_start(data)
 
                 # TTS 句子结束
@@ -541,6 +562,7 @@ class VolcRealtimeSession(RealtimeSession):
                 # TTS 结束
                 if event == EVENT_TTS_ENDED:
                     data = frame.get("payload_json", {})
+                    logger.info(f"[{self.session_id}] TTS 回复结束")
                     self._notify_tts_ended(data)
 
                 # ASR 识别结果
@@ -549,26 +571,33 @@ class VolcRealtimeSession(RealtimeSession):
                     if results:
                         text = results[0].get("text", "")
                         is_interim = results[0].get("is_interim", False)
+                        if is_interim:
+                            logger.debug(f"[{self.session_id}] ASR interim: {text}")
                         self._notify_asr_response(text, is_interim)
 
                 # 用户说话结束
                 if event == EVENT_ASR_ENDED:
+                    logger.info(f"[{self.session_id}] ASR 说话结束")
                     self._notify_asr_ended()
 
                 # 模型回复文本
                 if event == EVENT_CHAT_RESPONSE:
                     data = frame.get("payload_json", {})
+                    content = data.get("content", "")[:30]
+                    logger.debug(f"[{self.session_id}] LLM 回复: {content}...")
                     self._notify_chat_response(data)
 
                 # 模型回复结束
                 if event == EVENT_CHAT_ENDED:
                     data = frame.get("payload_json", {})
+                    logger.info(f"[{self.session_id}] LLM 回复结束")
                     self._notify_chat_ended(data)
 
         except asyncio.CancelledError:
             return
         except Exception as e:
             self._error_message = str(e)
+            self.is_active = False
             self._notify_error(e)
 
     async def send_audio(self, audio_chunk: bytes):
@@ -580,7 +609,12 @@ class VolcRealtimeSession(RealtimeSession):
             audio_chunk=audio_chunk,
             session_id=self.session_id,
         )
-        await self._ws.send(frame)
+        try:
+            await self._ws.send(frame)
+        except Exception as e:
+            self._error_message = str(e)
+            self.is_active = False
+            raise
 
     async def end_asr(self):
         """发送 END_ASR 信号，通知服务器音频输入结束（push_to_talk 模式）
@@ -591,14 +625,19 @@ class VolcRealtimeSession(RealtimeSession):
         if not self.is_active or not self._ws:
             return
 
-        await self._ws.send(
-            _build_event_message(
-                message_type=MSG_TYPE_FULL_CLIENT_REQUEST,
-                event=EVENT_END_ASR,
-                payload=b"{}",
-                session_id=self.session_id,
+        try:
+            await self._ws.send(
+                _build_event_message(
+                    message_type=MSG_TYPE_FULL_CLIENT_REQUEST,
+                    event=EVENT_END_ASR,
+                    payload=b"{}",
+                    session_id=self.session_id,
+                )
             )
-        )
+        except Exception as e:
+            self._error_message = str(e)
+            self.is_active = False
+            raise
 
     async def send_text(self, text: str):
         """发送文本（text 模式）"""
@@ -706,6 +745,18 @@ class VolcRealtimeService(RealtimeService):
         tts_sample_rate: int = 24000,
         recv_timeout: int = 120,
     ):
+        def _sanitize_voice(raw_voice: str) -> str:
+            candidate = (raw_voice or "").strip()
+            if candidate in SUPPORTED_REALTIME_VOICES:
+                return candidate
+            if candidate:
+                logger.warning(
+                    "[realtime_volc] Invalid speaker '%s', fallback to '%s'",
+                    candidate,
+                    DEFAULT_REALTIME_VOICE,
+                )
+            return DEFAULT_REALTIME_VOICE
+
         # 加载配置
         try:
             from backend.config.settings import settings
@@ -715,7 +766,8 @@ class VolcRealtimeService(RealtimeService):
             self.app_key = app_key or getattr(settings, "volc_realtime_app_key", "PlgvMymc7f3tQnJ6")
             self.ws_url = ws_url or getattr(settings, "volc_realtime_ws_url", "wss://openspeech.bytedance.com/api/v3/realtime/dialogue")
             self.model = model or getattr(settings, "volc_realtime_model", "1.2.1.1")
-            self.voice = voice or getattr(settings, "volc_realtime_voice", "zh_male_yunzhou_jupiter_bigtts")
+            configured_voice = voice or getattr(settings, "volc_realtime_voice", DEFAULT_REALTIME_VOICE)
+            self.voice = _sanitize_voice(configured_voice)
             self.enable_websearch = enable_websearch if enable_websearch is not None else getattr(settings, "volc_realtime_enable_websearch", False)
             self.enable_music = enable_music if enable_music is not None else getattr(settings, "volc_realtime_enable_music", False)
         except (ImportError, AttributeError):
@@ -725,7 +777,7 @@ class VolcRealtimeService(RealtimeService):
             self.app_key = app_key or "PlgvMymc7f3tQnJ6"
             self.ws_url = ws_url or "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
             self.model = model or "1.2.1.1"
-            self.voice = voice or "zh_male_yunzhou_jupiter_bigtts"
+            self.voice = _sanitize_voice(voice or DEFAULT_REALTIME_VOICE)
             self.enable_websearch = enable_websearch or False
             self.enable_music = enable_music or False
 

@@ -46,7 +46,7 @@ secrets.json
 *.swp
 *.swo
 *~
-.claude/
+.claude
 
 # 操作系统
 .DS_Store

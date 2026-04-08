@@ -180,6 +180,23 @@ class AudioRecorder {
         }
     }
 
+    /**
+     * 获取当前累积的音频数据（用于实时语音模式）
+     * 返回 WAV 格式的 ArrayBuffer，会清空已累积的数据
+     * @returns {ArrayBuffer|null} WAV 音频数据，没有数据时返回 null
+     */
+    getAudioData() {
+        if (!this.audioChunks || this.audioChunks.length === 0) {
+            return null;
+        }
+        // 合并所有累积的音频块
+        const mergedData = this._mergeAudioChunks(this.audioChunks);
+        const wavBuffer = this._float32ArrayToWav(mergedData, this.options.sampleRate);
+        // 清空已发送的数据
+        this.audioChunks = [];
+        return wavBuffer;
+    }
+
     _convertAudioBufferToFloat32Array(audioBuffer) {
         const numberOfChannels = audioBuffer.numberOfChannels;
         const length = audioBuffer.length;
