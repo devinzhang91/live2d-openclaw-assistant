@@ -1,0 +1,11 @@
+services:
+  live2d:
+    build: .
+    container_name: live2d-assistant
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
