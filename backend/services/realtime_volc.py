@@ -22,6 +22,7 @@ import logging
 logger = logging.getLogger("backend.services.realtime_volc")
 
 SUPPORTED_REALTIME_VOICES = {
+    "zh_female_vv_jupiter_bigtts",
     "zh_male_yunzhou_jupiter_bigtts",
     "zh_female_xiaohe_jupiter_bigtt",
     "zh_male_xiaotian_jupiter_bigtt",
