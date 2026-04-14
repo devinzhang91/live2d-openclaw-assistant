@@ -22,22 +22,60 @@ cp .env.example .env
 
 `.env` 关键配置项：
 
+### 传统语音回环（ASR → LLM → TTS）
+
+ASR、LLM、TTS 均支持本地免费方案（Whisper / OpenAI / Edge TTS）或火山引擎云端方案。
+
 ```bash
-# LLM（必需）
-LLM_PROVIDER=openai          # 或 deepseek
+# ASR：whisper（本地，无需密钥）或 volc（云端）
+ASR_PROVIDER=whisper
+# ASR_VOLC=your-volc-asr-app-id
+# VOLC_ASR_ACCESS_KEY=your-access-key
+# VOLC_ASR_RESOURCE_ID=volc.bigasr.sauc.duration
+
+# LLM：openai（兼容）或 volc（云端）
+LLM_PROVIDER=openai
 LLM_API_KEY=your-api-key
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
+# 或使用火山引擎 LLM：
+# LLM_PROVIDER=volc
+# VOLC_LLM_API_KEY=your-volc-api-key
+# VOLC_LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3/chat/completions
+# VOLC_LLM_MODEL=doubao-1-5-pro-32k-250115
 
-# Realtime 语音（推荐火山引擎，延迟最低）
-REALTIME_TTS_PROVIDER=volc
-VOLC_TTS_APP_ID=your-app-id
-VOLC_TTS_ACCESS_TOKEN=your-access-token
-VOLC_TTS_RESOURCE_ID=volc.service_type.10029
-VOLC_TTS_WS_URL=wss://openspeech.bytedance.com/api/v3/tts/bidirection
-VOLC_TTS_VOICE_TYPE=zh_female_cancan_mars_bigtts
+# TTS：edge（免费，无需密钥）或 volc（云端）
+TTS_PROVIDER=edge
+EDGE_TTS_VOICE=zh-CN-XiaoxiaoNeural
+# 或使用火山引擎 TTS：
+# TTS_PROVIDER=volc
+# VOLC_TTS_APP_ID=your-app-id
+# VOLC_TTS_ACCESS_TOKEN=your-access-token
+# VOLC_TTS_RESOURCE_ID=volc.service_type.10029
+# VOLC_TTS_VOICE_TYPE=zh_female_cancan_mars_bigtts
+```
 
-# OpenClaw Agent（可选）
+### Realtime 实时语音对话（推荐）
+
+Realtime 模式使用 **火山引擎 Ark** 平台（https://console.volcengine.com/ark/），延迟最低，支持端到端实时交互。
+
+```bash
+# Realtime 大模型（必需）
+VOLC_REALTIME_APP_ID=your-app-id
+VOLC_REALTIME_ACCESS_KEY=your-access-key
+VOLC_REALTIME_RESOURCE_ID=volc.speech.dialog
+VOLC_REALTIME_APP_KEY=your-app-key
+VOLC_REALTIME_WS_URL=wss://openspeech.bytedance.com/api/v3/realtime/dialogue
+VOLC_REALTIME_MODEL=1.2.1.1
+
+# Realtime 音色（必须带 _bigtts 后缀）
+VOLC_REALTIME_VOICE=zh_male_yunzhou_jupiter_bigtts    # 男声
+# VOLC_REALTIME_VOICE=zh_female_xiaohe_jupiter_bigtts # 女声
+```
+
+### OpenClaw Agent（可选）
+
+```bash
 OPENCLAW_ENABLED=true
 OPENCLAW_BASE_URL=http://127.0.0.1:18789
 OPENCLAW_AGENT_NAME=Live2D
