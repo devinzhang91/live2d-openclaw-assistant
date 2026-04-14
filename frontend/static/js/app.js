@@ -1643,10 +1643,24 @@ class App {
             const p = (result.settings.personalities || []).find(x => x.id === personalityId);
             const name = p ? p.name : personalityId;
             const ocStatus = openclaw.enabled ? ' | OpenClaw ✅' : '';
-            const modelName = selectedModel === 'Hiyori' ? 'Hiyori' : '茜茜';
-            const refreshReason = modelChanged ? ` | 模型：${modelName}` : '';
-            this.updateStatus(`已保存：${name}${ocStatus}${refreshReason}，正在刷新页面...`);
-            setTimeout(() => window.location.reload(), 300);
+            const modelDisplayNames = { 'Hiyori': 'Hiyori', 'Qianqian': '芊芊', 'Miku': '初音未来' };
+            const modelName = modelDisplayNames[selectedModel] || selectedModel;
+
+            // 直接切换 Live2D 模型（无需刷新页面）
+            if (modelChanged) {
+                if (window._waifuWidget) {
+                    const modelIdMap = { 'Hiyori': 0, 'Qianqian': 1, 'Miku': 2 };
+                    const newModelId = modelIdMap[selectedModel] ?? 0;
+                    window._waifuWidget.loadModel(newModelId);
+                    this.updateStatus(`已保存：${name}${ocStatus} | 模型：${modelName}`);
+                } else {
+                    // Fallback: 刷新页面
+                    this.updateStatus(`已保存：${name}${ocStatus} | 模型：${modelName}，正在刷新页面...`);
+                    setTimeout(() => window.location.reload(), 300);
+                }
+            } else {
+                this.updateStatus(`已保存：${name}${ocStatus}`);
+            }
         } catch (e) {
             console.error('[Settings] 保存设置失败:', e);
             this.showError(`保存设置失败：${e.message}`);

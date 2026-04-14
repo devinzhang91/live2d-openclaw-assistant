@@ -265,6 +265,11 @@
       "name": "Qianqian",
       "paths": ["/static/live2d/qianqian/qianqian.model3.json"],
       "message": "是芊芊哦 ~"
+    },
+    {
+      "name": "Miku",
+      "paths": ["/static/live2d/Miku/Miku.model3.json"],
+      "message": "是 Miku 哦 ~"
     }
   ]
 }

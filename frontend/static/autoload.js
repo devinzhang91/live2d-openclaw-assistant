@@ -34,6 +34,12 @@ function loadExternalResource(url, type) {
 // 初始化 Live2D
 (async () => {
   try {
+    // 模型名称 → 索引映射（供外部调用）
+    window.live2dModelIdMap = { 'Hiyori': 0, 'Qianqian': 1, 'Miku': 2 };
+
+    // 存储当前模型名称（供外部使用）
+    window.live2dCurrentModel = localStorage.getItem('live2d_model') || 'Hiyori';
+
     const getFirstSubdelegate = (appDelegate) => {
       const subdelegates = appDelegate?.subdelegates;
       if (!subdelegates) return null;
@@ -71,9 +77,23 @@ function loadExternalResource(url, type) {
       loadExternalResource(live2d_path + 'waifu-tips.js', 'js')
     ]);
 
+    // 捕获 WaifuQuore widget 实例，供外部调用 loadModel()
+    const _origInitWidget = window.initWidget;
+    window.initWidget = function(cfg) {
+      const p = _origInitWidget.call(window.initWidget, cfg);
+      if (p && typeof p.then === 'function') {
+        p.then(instance => {
+          window._waifuWidget = instance;
+          console.log('[Live2D] widget 实例已捕获');
+        }).catch(() => {});
+      }
+      return p;
+    };
+
     // 从 localStorage 获取用户选择的模型（默认 Hiyori）
     const savedModel = localStorage.getItem('live2d_model') || 'Hiyori';
-    const modelId = savedModel === 'Qianqian' ? 1 : 0;
+    const modelIdMap = { 'Hiyori': 0, 'Qianqian': 1, 'Miku': 2 };
+    const modelId = modelIdMap[savedModel] ?? 0;
     console.log('[Live2D] 加载模型:', savedModel, '索引:', modelId);
 
     // 禁用鼠标跟随：在初始化前就开始阻止

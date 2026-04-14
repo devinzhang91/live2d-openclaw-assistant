@@ -244,6 +244,23 @@ class Live2DController {
     }
 
     /**
+     * 判断当前是否为 Miku 模型
+     */
+    _isMikuModel() {
+        const appModel = this.getAppModel();
+        if (!appModel) return false;
+        try {
+            if (appModel._modelSetting && appModel._modelSetting._json) {
+                const json = appModel._modelSetting._json;
+                if (json.FileReferences && json.FileReferences.Moc) {
+                    return json.FileReferences.Moc.includes('miku');
+                }
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    /**
      * 判断当前是否为 Qianqian 模型
      */
     _isQianqianModel() {
@@ -437,6 +454,9 @@ class Live2DController {
         if (this._isQianqianModel()) {
             // Qianqian: 播放表情
             this._playQianqianRandomExpression(group);
+        } else if (this._isMikuModel()) {
+            // Miku: 播放动作
+            this._playMikuRandom(group);
         } else {
             // Hiyori: 播放动作
             this.playRandom(group, 1);
@@ -556,6 +576,8 @@ class Live2DController {
     playExpression(name) {
         if (this._isQianqianModel()) {
             this._setQianqianExpression(name);
+        } else if (this._isMikuModel()) {
+            this._playMikuMotion(name);
         } else {
             this._playHiyoriMotion(name);
         }
@@ -640,7 +662,7 @@ class Live2DController {
             'listening': () => this.playRandom('Listening'),
             'idle': () => this.playRandom('Idle'),
         };
-        
+
         if (map[name]) {
             map[name]();
         } else {
@@ -649,7 +671,82 @@ class Live2DController {
     }
 
     /**
-     * 从指定组随机播放动作（Hiyori 兼容）
+     * Miku 动作映射：语义名 → Miku motion 文件名
+     */
+    MIKU_MOTION_MAP = {
+        'wave': 'miku_flick1',       // 害羞脸红挥手
+        'headshake': 'miku_tap2',    // 摇头/思考
+        'nod': 'miku_flick_up',      // 天旋地转
+        'wave_left': 'miku_idle3',   // 睡醒起身
+        'shrug': 'miku_flick_up',    // 天旋地转
+        'legswing': 'miku_idle1',    // 待机普通
+        'jump': 'miku_tap1',         // 开心闭眼笑
+        'sway': 'miku_idle2',        // 好奇侧头
+        'idle': 'miku_idle1',        // 待机
+        'listening': 'miku_idle2',   // 好奇侧头
+        'thinking': 'miku_tap2',     // 摇头/思考
+        'happy': 'miku_tap1',        // 开心闭眼笑
+        'sad': 'miku_idle3',         // 睡醒起身
+    };
+
+    /**
+     * Miku 动作组 → motion 文件名
+     */
+    MIKU_MOTION_GROUPS = {
+        'Idle': ['miku_idle1', 'miku_idle2', 'miku_idle3'],
+        'Tap': ['miku_tap1', 'miku_tap2'],
+        'Flick': ['miku_flick1', 'miku_flick2'],
+        'FlickUp': ['miku_flick_up'],
+    };
+
+    /**
+     * 播放 Miku 动作
+     * @param {string} name - 动作语义名
+     */
+    _playMikuMotion(name) {
+        const motionName = this.MIKU_MOTION_MAP[name];
+        if (motionName) {
+            this._playMikuMotionByName(motionName);
+        } else if (this.MIKU_MOTION_GROUPS[name]) {
+            this._playMikuRandom(name);
+        } else {
+            // 默认播放 idle
+            this._playMikuMotionByName('miku_idle1');
+        }
+    }
+
+    /**
+     * 播放指定 Miku 动作
+     * @param {string} motionName - Miku 动作名（如 miku_idle1）
+     */
+    _playMikuMotionByName(motionName) {
+        const appModel = this.getAppModel();
+        if (!appModel) return;
+        // 将 motion 名转为实际文件名前缀（去掉 miku_ 前缀）
+        const motionFile = motionName.replace('miku_', 'miku_');
+        try {
+            if (typeof appModel.startMotion === 'function') {
+                appModel.startMotion(motionFile, 3);
+                console.log('[motion][Miku] startMotion(' + motionFile + ', 3)');
+            }
+        } catch (e) {
+            console.warn('[motion][Miku] 播放动作失败:', e);
+        }
+    }
+
+    /**
+     * 从 Miku 动作组中随机播放
+     * @param {string} group - 动作组名
+     */
+    _playMikuRandom(group) {
+        const motions = this.MIKU_MOTION_GROUPS[group];
+        if (!motions || motions.length === 0) return;
+        const motionName = motions[Math.floor(Math.random() * motions.length)];
+        this._playMikuMotionByName(motionName);
+    }
+
+    /**
+     * 从指定组随机播放动作（Hiyori/Miku 兼容）
      * @param {string} group - 动作组名
      * @param {number} priority - 优先级
      */
@@ -661,20 +758,25 @@ class Live2DController {
         }
 
         try {
-            // Cubism5 的 motion 接口
-            if (typeof appModel.startMotion === 'function') {
-                // 构建 motion 文件名（例如 Idle -> m01）
-                const motionMap = {
-                    'Idle': 'm01',
-                    'Listening': 'm02',
-                    'Thinking': 'm03',
-                    'Worried': 'm04',
-                    'Happy': 'm05',
-                };
-                const motionName = motionMap[group] || 'm01';
-                appModel.startMotion(motionName, priority);
-                console.log('[motion] startMotion(' + motionName + ', ' + priority + ')');
+            if (typeof appModel.startMotion !== 'function') return;
+
+            // Miku 动作组
+            if (this._isMikuModel()) {
+                this._playMikuRandom(group);
+                return;
             }
+
+            // Hiyori 动作组
+            const motionMap = {
+                'Idle': 'm01',
+                'Listening': 'm02',
+                'Thinking': 'm03',
+                'Worried': 'm04',
+                'Happy': 'm05',
+            };
+            const motionName = motionMap[group] || 'm01';
+            appModel.startMotion(motionName, priority);
+            console.log('[motion] startMotion(' + motionName + ', ' + priority + ')');
         } catch (e) {
             console.warn('[motion] 播放动作失败:', e);
         }
@@ -995,14 +1097,15 @@ class Live2DController {
 
     // ==================== 动作别名（与 app.js 兼容）====================
 
-    playWave() { this.playMotion('m05'); }
-    playHeadShake() { this.playMotion('m04'); }
-    playNod() { this.playMotion('m03'); }
-    playWaveLeft() { this.playMotion('m06'); }
-    playShrug() { this.playMotion('m10'); }
-    playLegSwing() { this.playMotion('m01'); }
-    playJump() { this.playMotion('m07'); }
-    playSway() { this.playMotion('m08'); }
+    // 使用语义名，通过 playExpression 统一分发到各模型适配逻辑
+    playWave() { this.playExpression('wave'); }
+    playHeadShake() { this.playExpression('headshake'); }
+    playNod() { this.playExpression('nod'); }
+    playWaveLeft() { this.playExpression('wave_left'); }
+    playShrug() { this.playExpression('shrug'); }
+    playLegSwing() { this.playExpression('legswing'); }
+    playJump() { this.playExpression('jump'); }
+    playSway() { this.playExpression('sway'); }
 }
 
 // 创建全局实例
